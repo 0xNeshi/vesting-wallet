@@ -1,0 +1,6 @@
+[package]
+name = "vesting_wallet"
+edition = "2024"
+
+[addresses]
+vesting_wallet = "0x0"
