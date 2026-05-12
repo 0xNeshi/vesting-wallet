@@ -93,12 +93,20 @@ fun publisher_bootstraps_admin_grants_third_party_drives_release_and_destroy() {
         test_scenario::return_shared(clk);
     };
 
-    // Tx 6 — ALICE: second payout for the other half.
+    // Tx 6 — ALICE: second payout for the other half. Both payouts now sit
+    // in her inventory as separate coins; merge them and confirm the full
+    // 1_000 grant landed.
     scenario.next_tx(ALICE);
     {
-        let payout = scenario.take_from_sender<Coin<SUI>>();
-        assert!(payout.value() == 500);
-        scenario.return_to_sender(payout);
+        let ids = test_scenario::ids_for_sender<Coin<SUI>>(&scenario);
+        assert!(ids.length() == 2);
+        let mut first = scenario.take_from_sender_by_id<Coin<SUI>>(*ids.borrow(0));
+        let second = scenario.take_from_sender_by_id<Coin<SUI>>(*ids.borrow(1));
+        assert!(first.value() == 500);
+        assert!(second.value() == 500);
+        first.join(second);
+        assert!(first.value() == 1_000);
+        scenario.return_to_sender(first);
     };
 
     // Tx 7 — anyone (BOB): drained wallet past end → reclaim storage.
