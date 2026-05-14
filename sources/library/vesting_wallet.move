@@ -256,6 +256,11 @@ public fun destroy_empty<T>(wallet: VestingWallet<T>, clock: &Clock) {
 
 // === Views ===
 
+/// What `release` would pay out if called now.
+public fun releasable<T>(wallet: &VestingWallet<T>, clock: &Clock): u64 {
+    vested_amount(wallet, clock) - wallet.released
+}
+
 /// The schedule curve evaluated at `clock.timestamp_ms()`.
 ///
 /// * Pre-start: zero.
@@ -267,7 +272,7 @@ public fun destroy_empty<T>(wallet: VestingWallet<T>, clock: &Clock) {
 ///
 /// The total is re-derived on every call, so deposits made at `t > start_ms`
 /// immediately participate in vesting at the current proportion.
-public fun vested_amount<T>(wallet: &VestingWallet<T>, clock: &Clock): u64 {
+fun vested_amount<T>(wallet: &VestingWallet<T>, clock: &Clock): u64 {
     let now = clock.timestamp_ms();
 
     if (now < wallet.start_ms) return 0;
@@ -280,11 +285,6 @@ public fun vested_amount<T>(wallet: &VestingWallet<T>, clock: &Clock): u64 {
     let elapsed = (now - wallet.start_ms) as u128;
     let vested = ((total as u128) * elapsed) / (wallet.duration_ms as u128);
     vested as u64
-}
-
-/// What `release` would pay out if called now.
-public fun releasable<T>(wallet: &VestingWallet<T>, clock: &Clock): u64 {
-    vested_amount(wallet, clock) - wallet.released
 }
 
 // === Accessors ===
