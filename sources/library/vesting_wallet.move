@@ -185,19 +185,7 @@ public fun receive_and_deposit<T>(wallet: &mut VestingWallet<T>, receiving: Rece
 /// call returns silently without emitting an event or minting a zero-value
 /// coin. Callers can poll-then-poke without pre-checking.
 public fun release<T>(wallet: &mut VestingWallet<T>, clock: &Clock, ctx: &mut TxContext) {
-    let amount = releasable(wallet, clock);
-    if (amount == 0) return;
-
-    wallet.released = wallet.released + amount;
-    let coin = coin::from_balance(wallet.balance.split(amount), ctx);
-    let beneficiary = wallet.beneficiary;
-    transfer::public_transfer(coin, beneficiary);
-
-    event::emit(Released<T> {
-        wallet_id: object::id(wallet),
-        beneficiary,
-        amount,
-    });
+    wallet.release_on_curve!(|wallet, clock| vested_amount(wallet, clock), clock, ctx)
 }
 
 // === Beneficiary management ===
@@ -258,7 +246,7 @@ public fun destroy_empty<T>(wallet: VestingWallet<T>, clock: &Clock) {
 
 /// What `release` would pay out if called now.
 public fun releasable<T>(wallet: &VestingWallet<T>, clock: &Clock): u64 {
-    vested_amount(wallet, clock) - wallet.released
+    wallet.releasable_on_curve!(|wallet, clock| wallet.vested_amount(clock), clock)
 }
 
 /// The schedule curve evaluated at `clock.timestamp_ms()`.
@@ -285,6 +273,60 @@ fun vested_amount<T>(wallet: &VestingWallet<T>, clock: &Clock): u64 {
     let elapsed = (now - wallet.start_ms) as u128;
     let vested = ((total as u128) * elapsed) / (wallet.duration_ms as u128);
     vested as u64
+}
+
+// === Curve extension points ===
+//
+// These macros expose `release` and `releasable` parameterized over the vesting
+// curve. Downstream modules that need a non-linear schedule (exponential,
+// stepped, milestone-gated, etc.) wrap the wallet in their own module and
+// invoke these with a custom `$calculate_vested_amount` closure — reusing the
+// release accounting, transfer, and event emission while swapping only the
+// curve. The built-in `release` / `releasable` are thin callers that pass the
+// linear `vested_amount` here.
+//
+// The closure must be monotonically non-decreasing in `clock.timestamp_ms()`
+// and bounded by `balance.value() + released`; violating either breaks the
+// `vested_amount - released` subtraction in `releasable_on_curve`.
+
+/// Release whatever the supplied curve says is vested-but-not-yet-released.
+/// See `release` for semantics — this is the same flow with a pluggable curve.
+public macro fun release_on_curve<$T>(
+    $wallet: &mut VestingWallet<$T>,
+    $calculate_vested_amount: |&VestingWallet<$T>, &Clock| -> u64,
+    $clock: &Clock,
+    $ctx: &mut TxContext,
+) {
+    let wallet = $wallet;
+    let clock = $clock;
+    let ctx = $ctx;
+
+    let amount = wallet.releasable_on_curve!($calculate_vested_amount, clock);
+    if (amount == 0) return;
+
+    wallet.released = wallet.released + amount;
+    let coin = coin::from_balance(wallet.balance.split(amount), ctx);
+    let beneficiary = wallet.beneficiary;
+    transfer::public_transfer(coin, beneficiary);
+
+    event::emit(Released<$T> {
+        wallet_id: object::id(wallet),
+        beneficiary,
+        amount,
+    });
+}
+
+/// What `release_on_curve` would pay out now under the supplied curve:
+/// `$calculate_vested_amount(wallet, clock) - wallet.released`.
+public macro fun releasable_on_curve<$T>(
+    $wallet: &VestingWallet<$T>,
+    $calculate_vested_amount: |&VestingWallet<$T>, &Clock| -> u64,
+    $clock: &Clock,
+): u64 {
+    let wallet = $wallet;
+    let clock = $clock;
+    let vested_amount = $calculate_vested_amount(wallet, clock);
+    vested_amount - wallet.released
 }
 
 // === Accessors ===
